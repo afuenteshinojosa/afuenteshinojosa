@@ -1,0 +1,181 @@
+install.packages(c("dplyr", "readr", "readxl", "ggplot2", "tidyr"))
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(stringr)
+library(ggplot2)
+
+# folder path (CHANGE AS NEEDED)
+folder <- "C:/Users/Usuario/Desktop/WHEP/DATA/Mitchell_extracted/mitchell"
+
+# Get a list of Excel files in the folder
+excel_files <- list.files(path = folder, pattern = "\\.xlsx$|\\.xls$", full.names = TRUE)
+
+# clean country names (to erase dots, commas, etc)
+clean_country_name <- function(country) {
+  # Remove any numbers and dots at the end of the country name
+  cleaned <- str_replace(country, "\\.\\.\\.[0-9]+$", "")
+  # Remove extra spaces at the beginning and end
+  cleaned <- str_trim(cleaned)
+  return(cleaned)
+}
+
+
+process_sheet <- function(sheet_data) {
+  # Convert to a data frame if it's not already one
+  sheet_data <- as.data.frame(sheet_data)
+  
+  # Get the countries from column names
+  countries <- names(sheet_data)[-c(1, 2)]  # Exclude the first two columns
+  countries <- sapply(countries, clean_country_name)
+  
+  # Get the items from first row
+  items <- as.character(unlist(sheet_data[1, -c(1,2)]))
+  
+  # Get the units from the second column, starting from row 3
+  units <- as.character(sheet_data[3:nrow(sheet_data), 2])
+  
+  # Get the years from first column, starting from row 3
+  years <- sheet_data[3:nrow(sheet_data), 1]
+  years <- as.numeric(as.character(years))
+  
+  # Create an empty data frame to store the result
+  result <- data.frame()
+  
+  # For each country/column
+  for(i in seq_along(countries)) {
+    # Get values for current country
+    values <- as.character(unlist(sheet_data[3:nrow(sheet_data), i + 2]))
+    
+    # Replace "..." with NA
+    values[values == "..." | values == ".." | values == "." | values == ""] <- NA
+    
+    temp_df <- data.frame(
+      year = years,
+      country = countries[i],
+      item = items[i],
+      unit = units,
+      value = values,
+      stringsAsFactors = FALSE
+    )
+    result <- rbind(result, temp_df)
+  }
+  
+  # Clean and convert values, handling NAs properly
+  result$value <- suppressWarnings(as.numeric(gsub("[^0-9.-]", "", as.character(result$value))))
+  result$year <- as.numeric(as.character(result$year))
+  
+  # Remove rows where the year is NA
+  result <- result[!is.na(result$year), ]
+  
+  return(result)
+}
+
+# Function to process each Excel file
+process_excel <- function(file_path) {
+  # Get the names of all sheets in the file
+  sheets <- excel_sheets(file_path)
+  
+  # Process each sheet
+  all_data <- map_df(sheets, function(sheet) {
+    tryCatch({
+      sheet_data <- read_excel(file_path, sheet = sheet)
+      processed_data <- process_sheet(sheet_data)
+      # Add the source file name
+      processed_data$source_file <- basename(file_path)
+      processed_data$sheet <- sheet
+      return(processed_data)
+    }, error = function(e) {
+      warning(sprintf("Error processing sheet %s in file %s: %s", 
+                      sheet, basename(file_path), e$message))
+      return(NULL)
+    })
+  })
+  
+  return(all_data)
+}
+
+# Function to verify and unify data types
+unify_types <- function(df) {
+  df$unit <- as.character(df$unit)
+  df$year <- as.numeric(as.character(df$year))
+  df$country <- as.character(df$country)
+  df$item <- as.character(df$item)
+  df$value <- as.numeric(as.character(df$value))
+  df$source_file <- as.character(df$source_file)
+  df$sheet <- as.character(df$sheet)
+  return(df)
+}
+
+# Process all files with error handling
+all_data <- data.frame()
+
+for(file in excel_files) {
+  tryCatch({
+    processed_file <- process_excel(file)
+    if(!is.null(processed_file) && nrow(processed_file) > 0) {
+      processed_file <- unify_types(processed_file)
+      all_data <- bind_rows(all_data, processed_file)
+    }
+  }, error = function(e) {
+    warning(sprintf("Error processing file %s: %s", basename(file), e$message))
+  })
+}
+
+# Remove duplicates based on country, year, and item
+final_data <- all_data |>
+  distinct(country, year, item, .keep_all = TRUE) |>
+  arrange(country, year, item)  # Sort the data
+
+
+
+
+
+
+##### pivoting (not working yet), not relevant 
+### only necessary to view it as the manual extracted data sets.
+
+# final_data <- all_data |>
+#   select(country, year, item, value, source_file, sheet) |>
+#   pivot_wider(
+#     names_from = year,
+#     values_from = value,
+#     id_cols = c(country, item),
+#     values_fn = first,
+#     names_sort = TRUE 
+#   ) |>
+#   arrange(country, item)
+
+
+
+
+### Categories
+
+crop_prod_country <- final_data |>
+  group_by(year, country, item, unit, value) 
+
+###               Plots examples:
+#### Production area in hectares
+
+crop_prod_country |>
+  filter(country == "Zimbabwe", unit =="1000 metric tons") |>
+  ggplot(aes(x = year , y = value)) +
+  geom_area() +
+  labs(title = "Crop production area in India (1000 ha)")+
+  facet_wrap(~item, scales = "free")
+
+crop_prod_country |>
+  filter(country == "Australia", unit=="1000 metric tons", item=="Sorghum") |>
+  ggplot(aes(x = year , y = value)) +
+  geom_area() +
+  labs(title = "Crop production in Australia (1000 metric tons)")+
+  facet_wrap(~item, scales = "free")
+
+crop_prod_country |>
+  filter(country == "China", unit =="1000 ha") |>
+  ggplot(aes(x = year , y = value)) +
+  geom_area() +
+  labs(title = "Crop production in China")+
+  facet_wrap(~item, scales = "free")
+
