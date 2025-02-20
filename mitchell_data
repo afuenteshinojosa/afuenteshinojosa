@@ -1,3 +1,7 @@
+#Alejandra Fuentes-Hinojosa
+#02.20.2025
+#SADT - IEGD. CCHS-CSIC
+
 install.packages(c("dplyr", "readr", "readxl", "ggplot2", "tidyr"))
 library(readxl)
 library(dplyr)
