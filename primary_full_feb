@@ -1,0 +1,631 @@
+#Alejandra Fuentes-Hinojosa
+#02.10.2025
+#SADT - IEGD. CCHS-CSIC
+
+
+# Install required libraries
+install.packages(c("dplyr", "readr", "readxl", "ggplot2", "tidyr"))
+library(dplyr)
+library(readr)
+library(readxl)
+library(ggplot2)
+library(tidyr)
+
+# Load required functions and paths
+source('C:/Users/Usuario/Desktop/WHEP/CODES/Global/R/ComDat_Global.R',echo = TRUE)
+
+# Load primary production and land use data
+Primary_all <- utils::read.csv(paste0(L_files_path,"Global/output/Primary_all.csv"))
+
+LUH2_area <- utils::read.csv(paste0(L_files_path,"Global/output/Hist_LU_C_stocks_areas_full.csv")) |> 
+  dplyr::filter(Year %in% c(1800:2021),
+                Land_Use %in% c("c3ann", "c4ann", "c3per", "c4per", "c3nfx")) |> 
+  dplyr::select(Year, ISO3, Land_Use, Area_Mha) |> 
+  dplyr::rename(iso3c = ISO3) |> 
+  dplyr::rename(AreaLU_ha_LUH2 = Area_Mha) |>
+  dplyr::mutate(AreaLU_ha_LUH2 = AreaLU_ha_LUH2 * 1e6)
+
+
+# Read Europe and LATAM animal data
+europe_animal_data <- read_excel("C:/Users/Usuario/Desktop/WHEP/DATA/EXTRACTED/Europe_FAO_completed.xlsx", sheet = "Livestock")
+latam_animal_data <- read_excel("C:/Users/Usuario/Desktop/WHEP/DATA/EXTRACTED/LatinAmerica_FAO_completed.xlsx", sheet = "Livestock")
+
+# Identifying year columns for animal data 
+year_columns_animal <- grep("^(18|19)[0-9]{2}$", colnames(latam_animal_data), value = TRUE)
+
+# Convert year columns to numeric for LATAM animal data
+latam_animal_data[year_columns_animal] <- latam_animal_data[year_columns_animal] |>
+  lapply(function(x) suppressWarnings(as.numeric(x)))
+
+# Read Europe animal data with NA handling
+europe_animal_data <- read_excel(
+  "C:/Users/Usuario/Desktop/WHEP/DATA/EXTRACTED/Europe_FAO_completed.xlsx", 
+  sheet = "Livestock",
+  na = c("", "NA", "#N/A"),
+  guess_max = 10000,
+  .name_repair = "minimal"
+)
+
+# Clean and process Europe animal data
+europe_animal_data <- europe_animal_data |>
+  dplyr::rename_with(~ gsub("^X", "", .), starts_with("X")) |>
+  dplyr::mutate(
+    Area = as.character(Area),
+    ISO3 = as.character(ISO3),
+    Area_Code = as.numeric(Area_Code),
+    Item = as.character(Item),
+    Item_Code = as.character(Item_Code),
+    Unit = as.character(Unit)
+  )
+# Remove ".0" from the year columns to make them valid years (e.g., "1800" instead of "1800.0")
+colnames(europe_animal_data) <- gsub("\\.0$", "", colnames(europe_animal_data))
+
+# Identify year columns for Europe animal data
+year_columns_europe_animal <- grep("^(18|19)[0-9]{2}$", colnames(europe_animal_data), value = TRUE)
+
+# Convert year columns to integers for Europe animal data (to remove decimals)
+europe_animal_data <- europe_animal_data |>
+  dplyr::mutate(across(all_of(year_columns_europe_animal), 
+                       ~as.integer(as.character(.))))  # Remove decimal places
+
+# Convert to long format for Europe animal data and adjust the 'Livestock' column and 'Unit'
+europe_animal_long <- europe_animal_data |>
+  pivot_longer(
+    cols = all_of(year_columns_europe_animal),
+    names_to = "Year",
+    values_to = "Livestock"
+  ) |>
+  dplyr::mutate(
+    Livestock = Livestock * 1000,  # Adjust values by multiplying by 1000
+    Unit = "heads",                # Change the unit to "heads"
+    Region = "Europe",            # Add region info
+    Item_Code = as.character(Item_Code)
+  )
+
+# Convert to long format for LATAM animal data and adjust the 'Livestock' column and 'Unit'
+latam_animal_long <- latam_animal_data |>
+  pivot_longer(
+    cols = all_of(year_columns_animal),
+    names_to = "Year",
+    values_to = "Livestock"
+  ) |>
+  dplyr::mutate(
+    Livestock = Livestock * 1000,  # Adjust values by multiplying by 1000
+    Unit = "heads",                # Change the unit to "heads"
+    Region = "Americas",            # Add region info
+    Item_Code = as.character(Item_Code)
+  )
+
+# Combine the Europe and LATAM animal data
+animal_manual <- dplyr::bind_rows(latam_animal_long, europe_animal_long)
+animal_hq <- dplyr::bind_rows(animal_manual |> 
+                                dplyr::rename(item=Item,
+                                              item_code=Item_Code,
+                                              area_code=Area_Code,
+                                              Value=Livestock,
+                                              unit=Unit) |> 
+                                dplyr::mutate(unit="heads",
+                                              item_code=as.numeric(item_code),
+                                              Year=as.numeric(Year)) |> 
+                                dplyr::select(-ISO3),
+                              Primary_all)
+
+
+# Read Europe and LATAM production data
+europe_production <- read_excel("C:/Users/Usuario/Desktop/WHEP/DATA/EXTRACTED/Europe_FAO_completed.xlsx", sheet = "Production")
+latam_production <- read_excel("C:/Users/Usuario/Desktop/WHEP/DATA/EXTRACTED/LatinAmerica_FAO_completed.xlsx", sheet = "Production")
+
+# Clean up column names by removing ".0" from the year columns in Europe production
+colnames(europe_production) <- gsub("\\.0$", "", colnames(europe_production))
+
+# Clean up column names by removing ".0" from the year columns in LATAM production
+colnames(latam_production) <- gsub("\\.0$", "", colnames(latam_production))
+
+# Identify year columns for Europe production (no more ".0")
+year_columns_europe_production <- grep("^(18|19)[0-9]{2}$", colnames(europe_production), value = TRUE)
+
+# Print the year columns to confirm they're being identified
+print(year_columns_europe_production)
+
+# Convert year columns to numeric for Europe production data
+europe_production <- europe_production |>
+  dplyr::mutate(across(all_of(year_columns_europe_production), ~as.numeric(as.character(.))))
+
+# Convert to long format for Europe production data
+europe_production_long <- europe_production |>
+  pivot_longer(
+    cols = all_of(year_columns_europe_production),  # Select the year columns
+    names_to = "Year",
+    values_to = "Production"
+  ) |>
+  dplyr::mutate(
+    Production = Production * 1000,  # Adjust values by multiplying by 1000
+    Region = "Europe"               # Add region info
+  )
+
+# Identify year columns for LATAM production (no more ".0")
+year_columns_latam_production <- grep("^(18|19)[0-9]{2}$", colnames(latam_production), value = TRUE)
+
+# Print the year columns to confirm they're being identified
+print(year_columns_latam_production)
+
+# Convert year columns to numeric for LATAM production data
+latam_production <- latam_production |>
+  dplyr::mutate(across(all_of(year_columns_latam_production), ~as.numeric(as.character(.))))
+
+# Convert to long format for LATAM production data
+latam_production_long <- latam_production |>
+  pivot_longer(
+    cols = all_of(year_columns_latam_production),  # Select the year columns
+    names_to = "Year",
+    values_to = "Production"
+  ) |>
+  dplyr::mutate(
+    Production = Production * 1000,  # Adjust values by multiplying by 1000
+    Region = "Americas"             # Add region info
+  )
+
+# Combine Europe and LATAM production data
+production_manual <- dplyr::bind_rows(latam_production_long, europe_production_long)
+
+production_hq <- dplyr::bind_rows(area_manual |> 
+                                    dplyr::rename(item=Item,
+                                                  item_code=Item_Code,
+                                                  area=Area,
+                                                  area_code=Area_Code,
+                                                  Value=Area_Manual) |> 
+                                    dplyr::mutate(unit="tonnes",
+                                                  item_code=as.numeric(item_code),
+                                                  Year=as.numeric(Year)) |> 
+                                    dplyr::select(-ISO3),
+                                  Primary_all)
+
+
+# upload LATAM and Europe data 
+europe_data <- "C:/Users/Usuario/Desktop/WHEP/DATA/EXTRACTED/Area_Europe.xlsx"
+area_europe_data <- read_excel(europe_data)
+
+latam_data <- "C:/Users/Usuario/Desktop/WHEP/DATA/EXTRACTED/Area_LATAM.xlsx"
+area_latam_data <- read_excel(latam_data)
+
+# identifying year columuns in latam data
+year_columns_latam <- grep("^(18|19)[0-9]{2}$", colnames(area_latam_data),
+                           value = TRUE)
+
+# years columns in LATAM to be numeric
+area_latam_data[year_columns_latam] <- area_latam_data[year_columns_latam] |>
+  lapply(function(x) suppressWarnings(as.numeric(x)))
+
+# Read the Excel file with explicit na handling and sheet specification
+area_europe_data <- read_excel(
+  europe_data,
+  na = c("", "NA", "#N/A"),  # Specify NA values
+  guess_max = 10000, # Increase guess_max for better column type detection
+  .name_repair = "minimal"   # Preserve column names as is
+)
+
+# Print the first few rows and structure to verify the loading
+print("Initial data structure:")
+str(area_europe_data)
+print("\nFirst few rows:")
+head(area_europe_data)
+
+# Clean and process the data
+area_europe_data <- area_europe_data |>
+  # Ensure all columns are present and properly named
+  dplyr::rename_with(~ gsub("^X", "", .), starts_with("X")) |> 
+  # Remove X if present
+  # Convert columns to proper types
+  dplyr::mutate(
+    Area = as.character(Area),
+    ISO3 = as.character(ISO3),
+    Area_Code = as.numeric(Area_Code),
+    Item = as.character(Item),
+    Item_Code = as.character(Item_Code),
+    Unit = as.character(Unit)
+  )
+
+# Identify year columns again (in case column names were affected)
+year_columns_europe <- grep("^(18|19)[0-9]{2}$", colnames(area_europe_data), 
+                            value = TRUE)
+
+# Convert year columns to numeric
+area_europe_data <- area_europe_data |>
+  dplyr::mutate(across(all_of(year_columns_europe), 
+                       ~as.numeric(as.character(.))))
+
+# Convert to long format
+area_europe_long <- area_europe_data |>
+  pivot_longer(
+    cols = all_of(year_columns_europe),
+    names_to = "Year",
+    values_to = "Area_Manual"
+  ) |>
+  dplyr::mutate(
+    Area_Manual = Area_Manual * 1000,  # value in ha
+    Region = "Europe"                  # Add region
+  )
+
+# latam to long format
+area_latam_long <- area_latam_data |>
+  pivot_longer(
+    cols = all_of(year_columns_latam),
+    names_to = "Year",
+    values_to = "Area_Manual"
+  ) |>
+  dplyr::mutate(
+    Area_Manual = Area_Manual * 1000,  # value in ha
+    Region = "Americas"                  # add region
+  )
+
+
+#area_manual y area_hq 
+area_manual <- dplyr::bind_rows(area_latam_long, area_europe_long)
+area_hq <- dplyr::bind_rows(area_manual |> 
+                              dplyr::rename(item=Item,
+                                            item_code=Item_Code,
+                                            area=Area,
+                                            area_code=Area_Code,
+                                            Value=Area_Manual) |> 
+                              dplyr::mutate(unit="ha",
+                                            item_code=as.numeric(item_code),
+                                            Year=as.numeric(Year)) |> 
+                              dplyr::select(-ISO3),
+                              dplyr::select(-Unit),
+                            Primary_all)
+#### MERGE DATA with new data sets
+hq_data <- area_hq %>%
+  bind_rows(production_hq) %>%
+  bind_rows(animal_hq)
+
+# Load other data for merging
+crop_area_row <- hq_data |> 
+  dplyr::filter(unit %in% c("ha", "tonnes", "heads")) |>
+  dplyr::select(Year, area, area_code, item, Value, unit) |> 
+  dplyr::rename(Area_ha = Value) |>
+  dplyr::left_join(items_prod_full |> 
+                     dplyr::select(item_prod, c3_c4, ann_per_nfx) |> 
+                     dplyr::rename(item = item_prod)) |> 
+  dplyr::left_join(regions_full |> 
+                     dplyr::rename(area_code = code) |> 
+                     dplyr::select(area_code, iso3c)) |> 
+  dplyr::mutate(Land_Use = paste0(c3_c4, ann_per_nfx)) |> 
+  dplyr::select(Year, iso3c, item, Land_Use, Area_ha) |>
+  dplyr::full_join(Years |> 
+                     dplyr::select(Year)) |> 
+  dplyr::ungroup() |> 
+  tidyr::complete(Year, nesting(iso3c, item, Land_Use)) |> 
+  dplyr::full_join(LUH2_area) |> 
+  dplyr::group_by(iso3c, item, Land_Use) |>
+  FillingProxy(Area_ha, AreaLU_ha_LUH2, Year) |> 
+  dplyr::left_join(regions_full |> 
+                     dplyr::select(iso3c, name, region_UN) |> 
+                     dplyr::rename(Country_name = name)) |> 
+  dplyr::ungroup()
+
+#Exclude URSS and Russian Federation from Europe in Region_UN:
+# List of countries that were part of the Soviet Union (URSS)
+ussr_countries <- c("Russian Federation", "Russia", "Armenia",
+                    "Azerbaijan", "Belarus",
+                    "Estonia", "Georgia", "Kazakhstan", "Kyrgyzstan", "Latvia",
+                    "Lithuania", "Moldova", "URSS", "USSR", "Tajikistan",
+                    "Turkmenistan", "Ukraine", "Uzbekistan")
+
+# Update the region_UN for these countries
+crop_area_row <- crop_area_row |>
+  mutate(region_UN = ifelse(Country_name %in%
+                              ussr_countries, "USSR/Russia", region_UN))
+
+
+# Ensure that item_code_prod is the same type in both data frames
+crop_area_row <- crop_area_row |>
+  mutate(item = as.character(item))
+
+combined_area_data <- combined_area_data |>
+  mutate(Item_Code = as.character(Item_Code))  
+# Ensure that Item_Code is a character
+
+# Merging LATAM and Europe data with the crop area data
+Comparison_raw <- crop_area_row |> 
+  dplyr::left_join(items_prod_full |> 
+                     dplyr::select(item_prod, item_code_prod) |> 
+                     dplyr::rename(item = item_prod) |>
+                     # Ensure item_code_prod is character here
+                     dplyr::mutate(item_code_prod = as.character(item_code_prod))) |> 
+  dplyr::mutate(Source = ifelse(Source_Area_ha == "Original", "FAO", "LUH2FAO")) |> 
+  dplyr::select(Year, Country_name, iso3c, region_UN, Land_Use, item, unit, item_code_prod, Source, Area_ha) |> 
+  # Join with combined_area_data
+  dplyr::left_join(combined_area_data |>   
+                     dplyr::rename(item_code_prod = Item_Code, iso3c = ISO3) |> 
+                     dplyr::mutate(
+                       Year = as.numeric(Year),
+                       # Ensure item_code_prod is character here too
+                       item_code_prod = as.character(item_code_prod)
+                     ) |> 
+                     dplyr::select(Year, item_code_prod, iso3c, Area_Manual),
+                   # Specify relationship to handle many-to-many warning
+                   relationship = "many-to-many")
+
+# LUH2_FAO vs Manual Comparison
+Comparison_LUH2FAO_Manual <- Comparison_raw |> 
+  dplyr::rename(Area_LUH2FAO = Area_ha) |> 
+  tidyr::pivot_longer(Area_LUH2FAO:Area_Manual) |> 
+  dplyr::filter(!is.na(value)) |> 
+  dplyr::mutate(Source = ifelse(name == "Area_Manual", "Area_Manual", Source))
+
+# # Consolidate area dataset
+# Crop_area <- Comparison_raw |> 
+#   dplyr::mutate(
+#     Area_ha = ifelse(!is.na(Area_Manual), Area_Manual, Area_ha),
+#     Source = ifelse(!is.na(Area_Manual), "Juan", Source),
+#     Source_Quality = ifelse(Source %in% c("FAO", "Juan"), "High", "Low"),
+#     Source_Quality = factor(Source_Quality, levels = c("Low", "High"))
+#   ) |> 
+#   dplyr::select(Year, Country_name, iso3c, region_UN, Land_Use, item, item_code_prod, Source, Source_Quality, Area_ha)
+Crop_area <- Comparison_raw |> 
+  dplyr::mutate(
+    # First determine if we should use Manual data
+    Area_ha = ifelse(!is.na(Area_Manual), Area_Manual, Area_ha),
+    # Update source to reflect manual data
+    Source = ifelse(!is.na(Area_Manual), "Juan", Source),
+    # Set quality based on source - High for FAO and Juan (manual) data, Low for others
+    Source_Quality = case_when(
+      Source == "FAO" ~ "High",
+      Source == "Juan" ~ "High",
+      TRUE ~ "Low"
+    ),
+    # Ensure Source_Quality is a factor with correct levels
+    Source_Quality = factor(Source_Quality, levels = c("Low", "High"))
+  ) |> 
+  # Select final columns in desired order
+  dplyr::select(Year, Country_name, iso3c, region_UN, Land_Use, item, 
+                item_code_prod, Categ, Source, Source_Quality, Area_ha)
+colnames(Crop_area)
+# Quality tests
+Crop_area_q_r <- Crop_area |> 
+  dplyr::group_by(Year, region_UN, unit, Source_Quality) |> 
+  dplyr::summarize(Area = sum(Area_ha, na.rm = TRUE) / 1000000, n = n())
+
+Crop_area_q_i <- Crop_area |> 
+  dplyr::group_by(Year, item, unit, Source_Quality) |> 
+  dplyr::summarize(Area = sum(Area_ha, na.rm = TRUE) / 1000000)
+
+Crop_area_q_r_i <- Crop_area |> 
+  dplyr::group_by(Year, region_UN, Source_Quality, item) |> 
+  dplyr::summarize(Area = sum(Area_ha, na.rm = TRUE) / 1000000, n = n())
+
+Crop_area_country <- Crop_area |> 
+  dplyr::group_by(Year, region_UN, Country_name, Source_Quality, item) |> 
+  dplyr::summarize(Area = sum(Area_ha, na.rm = TRUE) / 1000000, n = n())
+
+
+# Quality tests (Regional visualization)
+ggplot(Crop_area_q_r, aes(x = Year, y = Area, fill = Source_Quality)) +
+  geom_area(position = "fill") +
+  facet_wrap("region_UN")
+
+ggplot(Crop_area_q_r, aes(x = Year, y = n, fill = Source_Quality)) +
+  geom_area(position = "fill") +
+  facet_wrap("region_UN")
+
+# Quality tests (Regional visualization, area full)
+
+ggplot(Crop_area_q_r, aes(x = Year, y = Area, fill = Source_Quality)) +
+  geom_area() +
+  facet_wrap("region_UN", scales = "free")
+
+# Item-level tests (Visualization)
+ggplot(Crop_area_q_i, aes(x = Year, y = Area, fill = Source_Quality)) +
+  geom_area() +
+  facet_wrap("item", scales = "free")
+
+#ggsave
+
+
+
+#### PLOTS ####
+
+Crop_area_q_i |>
+  filter(item == "Wheat") |>
+  ggplot(aes(x = Year, y = Area, fill = Source_Quality)) +
+  geom_area() +
+  facet_wrap(~item, scales = "free")
+
+# Item crop by region:
+Crop_area_q_r_i |>
+  filter(region_UN %in% c("Americas"), item == "Rice") |>
+  ggplot(aes(x = Year, y = Area, fill = Source_Quality)) +
+  labs(title = "Rice production area in Americas",
+       x = "Year", 
+       y = "Area") +
+  geom_area() +
+  facet_wrap(~region_UN)
+
+#Item crop in USSR/Russia
+
+Crop_area_q_r_i |>
+  filter(region_UN == "Europe", item == "Wheat") |>
+  ggplot(aes(x = Year, y = Area, fill = Source_Quality)) +
+  labs(title = "Wheat production area in EU (1850-2020)",
+       x = "Year", 
+       y = "Area") +
+  geom_area(position = "fill") +
+  facet_wrap(~region_UN)
+
+
+#amount of data per region
+
+Crop_area_q_r |>
+  filter(region_UN %in% c("USSR/Russia", "RoW", NA)) |>
+  ggplot(aes(x = Year, y = n, fill = Source_Quality)) +
+  geom_area(position = "fill") +
+  facet_wrap(~region_UN)
+
+
+# Item crop by country:
+
+Crop_area_country |>filter(Country_name == "Brazil", 
+                           item == "Wheat", 
+                           Year >= 1850, 
+                           Year <= 2020) |>
+  ggplot(aes(x = Year, y = Area, color = Source_Quality, group = Source_Quality)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  scale_x_continuous(limits = c(1850, 2020), 
+                     breaks = seq(1850, 2020, by = 20)) +
+  labs(title = "Wheat area in Brazil (1850-2020)",
+       x = "Year", 
+       y = "Area (Million ha)",
+       color = "Source Quality") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+# Item crop 
+Crop_area_q_r_i |>
+  filter(item== "Barley") |>
+  ggplot(aes(x = Year, y = Area, fill = Source_Quality)) +
+  geom_area(position = "fill") +
+  facet_wrap(~region_UN)
+
+
+
+#Crop area per country detailed 
+
+Crop_area_country |>
+  filter(Country_name == "Brazil", item == "Wheat") |>
+  ggplot(aes(x = Year, y = Area)) +
+  # Fill the area for High-quality source
+  geom_area(data = function(d) filter(d, Source_Quality == "High"), 
+            aes(fill = Source_Quality), position = "stack", alpha = 0.7) + 
+  # Plot dots for Low-quality source
+  geom_point(data = function(d) filter(d, Source_Quality == "Low"), 
+             aes(color = Source_Quality), size = 3, alpha = 0.7) + 
+  scale_fill_manual(values = c("High" = "blue"), 
+                    labels = c("High" = "High (Area)")) + 
+  scale_color_manual(values = c("Low" = "red"), 
+                     labels = c("Low" = "Low (Point)")) + 
+  facet_wrap(~Country_name) +
+  scale_x_continuous(limits = c(1850, 2020), 
+                     breaks = seq(1850, 2020, by = 20)) +
+  labs(title = "Wheat production area in Brazil (1850-2020)",
+       x = "Year", 
+       y = "Area (Million of hectares)") + 
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "bottom") +
+  # Combine both legends with a single title
+  guides(fill = guide_legend(title = "Source Quality"),
+         color = guide_legend(title = NULL))
+
+### ANIMALS
+
+Crop_area_country |>
+  filter(Country_name == "Spain", item == "Pigs") |>
+  ggplot(aes(x = Year, y = Area)) +
+  # Fill the area for High-quality source
+  geom_area(data = function(d) filter(d, Source_Quality == "High"), 
+            aes(fill = Source_Quality), position = "stack", alpha = 0.7) + 
+  # Plot dots for Low-quality source
+  geom_point(data = function(d) filter(d, Source_Quality == "Low"), 
+             aes(color = Source_Quality), size = 3, alpha = 0.7) + 
+  scale_fill_manual(values = c("High" = "blue"), 
+                    labels = c("High" = "High (Area)")) + 
+  scale_color_manual(values = c("Low" = "red"), 
+                     labels = c("Low" = "Low (Point)")) + 
+  facet_wrap(~Country_name) +
+  scale_x_continuous(limits = c(1850, 2020), 
+                     breaks = seq(1850, 2020, by = 20)) +
+  labs(title = "Pigs production area in Spain (1850-2020)",
+       x = "Year", 
+       y = "Area (Million of hectares)") + 
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "bottom") +
+  # Combine both legends with a single title
+  guides(fill = guide_legend(title = "Source Quality"),
+         color = guide_legend(title = NULL))
+
+
+
+### Plots per crop categories
+
+
+# Create mapping and join with Crop_area
+Crop_area <- Crop_area %>%
+  left_join(dplyr::select(items_prod_full, item_prod, Categ), by = c("item" = "item_prod"))
+
+# Original Quality tests
+Crop_area_q_r <- Crop_area %>%
+  group_by(Year, region_UN, Source_Quality) %>%
+  summarize(Area = sum(Area_ha, na.rm = TRUE) / 1000000, n = n())
+
+Crop_area_q_i <- Crop_area %>%
+  group_by(Year, item, Source_Quality) %>%
+  summarize(Area = sum(Area_ha, na.rm = TRUE) / 1000000)
+
+Crop_area_q_r_i <- Crop_area %>%
+  group_by(Year, region_UN, Source_Quality, item) %>%
+  summarize(Area = sum(Area_ha, na.rm = TRUE) / 1000000, n = n())
+
+Crop_area_country <- Crop_area %>%
+  group_by(Year, region_UN, Country_name, Source_Quality, item) %>%
+  summarize(Area = sum(Area_ha, na.rm = TRUE) / 1000000, n = n())
+
+# New analyses with Categories
+Crop_area_q_categ <- Crop_area %>%
+  group_by(Year, Categ, Source_Quality) %>%
+  summarize(Area = sum(Area_ha, na.rm = TRUE) / 1000000)
+
+Crop_area_q_r_categ <- Crop_area %>%
+  group_by(Year, region_UN, Source_Quality, Categ) %>%
+  summarize(Area = sum(Area_ha, na.rm = TRUE) / 1000000, n = n())
+
+Crop_area_country_categ <- Crop_area %>%
+  group_by(Year, region_UN, Country_name, Source_Quality, Categ) %>%
+  summarize(Area = sum(Area_ha, na.rm = TRUE) / 1000000, n = n())
+
+# Original visualizations
+# Regional quality distribution
+ggplot(Crop_area_q_r, aes(x = Year, y = Area, fill = Source_Quality)) +
+  geom_area(position = "fill") +
+  facet_wrap("region_UN")
+
+ggplot(Crop_area_q_r, aes(x = Year, y = n, fill = Source_Quality)) +
+  geom_area(position = "fill") +
+  facet_wrap("region_UN")
+
+# Quality tests (Regional visualization, area full)
+ggplot(Crop_area_q_r, aes(x = Year, y = Area, fill = Source_Quality)) +
+  geom_area() +
+  facet_wrap("region_UN")
+
+# Item-level tests
+ggplot(Crop_area_q_i, aes(x = Year, y = Area, fill = Source_Quality)) +
+  geom_area() +
+  facet_wrap("item", scales = "free")
+
+# New visualizations with Categories
+# Category-level tests
+ggplot(Crop_area_q_categ, aes(x = Year, y = Area, fill = Source_Quality)) +
+  geom_area(position="fill") +
+  facet_wrap("Categ", scales = "free") +
+  labs(title = "Area by Category in the World")
+
+# Regional-Category tests
+Crop_area_q_r_categ |>
+  filter(region_UN == "Americas") |>
+  ggplot(aes(x = Year, y = Area, fill = Source_Quality)) +
+  geom_area(position = "fill") +
+  facet_grid(Categ ~ region_UN, scales = "free_y") +
+  labs(title = "Crop area by category in Americas")+
+  facet_wrap(~Categ)
+
+Crop_area_country_categ |>
+  filter(Country_name == "Spain") |>
+  ggplot(aes(x = Year, y = Area, fill = Source_Quality)) +
+  geom_area(position = "fill") +
+  facet_grid(Categ ~ region_UN, scales = "free_y") +
+  labs(title = "Crop area by category in Spain")+
+  facet_wrap(~Categ)
+
