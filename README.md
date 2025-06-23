@@ -1,7 +1,7 @@
 - 👋 Hi, I’m @afuenteshinojosa
 - 👀 I’m interested in food systems
 - 🌱 I’m currently learning about how to spatialize data
-- 💞️ I’m looking to collaborate on ERC ST - WHEP Project 
+- 💞️ I’m currently working in the ERC ST - WHEP Project 
 - 📫 How to reach me alejandra.fuentes@cchs.csic.es
 - 😄 Pronouns: she/her
 - 
