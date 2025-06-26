@@ -4,7 +4,6 @@
 - 💞️ I’m currently working in the ERC ST - WHEP Project 
 - 📫 How to reach me alejandra.fuentes@cchs.csic.es
 - 😄 Pronouns: she/her
-- 
 
 <!---
 afuenteshinojosa/afuenteshinojosa is a ✨ special ✨ repository because its `README.md` (this file) appears on your GitHub profile.
