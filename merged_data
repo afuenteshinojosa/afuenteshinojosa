@@ -1,0 +1,213 @@
+# ==============================================================================
+# Merge of agricultural data from 1800 - 2020
+# Alejandra Fuentes-Hinojosa
+# alejandra.fuentes@cchs.csic.es
+# WHEP Project - IEGD - CSIC 2026
+# ==============================================================================
+
+# libraries needed in case you don't have the WHEP Rproject loaded:
+
+library(dplyr)
+library(readxl)
+library(readr)
+
+# open regions data
+regions_data <- readxl::read_excel("C:/Users/Usuario/Desktop/WHEP_ALE/CODES/General/input/Codes_coefs.xlsx",
+  sheet = "regions_full"
+)
+
+country_lookup <- regions_data |>
+  dplyr::select(
+    country = name,
+    polity_name,
+    iso3c,
+    polity_code,
+    FAOSTAT_name,
+  ) |>
+  dplyr::mutate(across(everything(), ~ tolower(as.character(.)))) |>
+  dplyr::filter(!is.na(country))
+
+colnames(country_lookup)
+# Preparing data before merging - mitchell_juan_fao and items from Juan's data
+
+# Load and prepare juan_data as reference table for item/item_code
+juan_data <- read.csv("C:/Users/Usuario/Desktop/WHEP_ALE/DATA/EXTRACTED/Juan_data.csv") |>
+  dplyr::mutate(across(everything(), ~ tolower(as.character(.)))) |>
+  dplyr::select(item, item_code) |>
+  dplyr::distinct()
+
+
+# Load the "mitchell_juan_fao.csv" dataset
+
+mitchell_juan_fao <- readr::read_csv(
+  "C:/Users/Usuario/Desktop/WHEP_ALE/DATA/EXTRACTED/mitchell_juan_fao.csv"
+) |>
+  dplyr::mutate(across(everything(), ~ tolower(as.character(.)))) |>
+  dplyr::mutate(
+    item = case_when(
+      item %in% c("citrus fruit", "citrus") ~ "other citrus fruit, n.e.c.",
+      item == "camel" ~ "camels",
+      item == "cottonseed" ~ "cotton seed",
+      TRUE ~ item
+    ),
+    unit = case_when(
+      unit == "mt" ~ "tonnes",
+      TRUE ~ unit
+    )
+  )
+
+# make sure we have all columns
+
+colnames(mitchell_juan_fao)
+
+# Time to apply juan_data to mitchell_juan_fao
+
+mitchell_juan_fao <- mitchell_juan_fao |>
+  # Use juan_data to complete missing item_code
+  left_join(juan_data, by = "item", suffix = c("", "_juan")) |>
+  # Prioritize original item_code, use juan_data if NA or empty
+  mutate(
+    item_code = ifelse(is.na(item_code) | item_code == "", item_code_juan, item_code)
+  ) |>
+  # Remove temporary column
+  dplyr::select(-item_code_juan) |>
+  # Harmonize data types
+  mutate(
+    item_code = as.character(item_code),
+    year = as.character(year)
+  )
+
+# Preparing data before merging - Polities rest of and iia_data
+
+# Prepare IIA data (extracted by Álvaro A-R.) 
+iia_data <- readxl::read_excel(
+  "C:/Users/Usuario/Desktop/WHEP_ALE/DATA/EXTRACTED/iia_area_prod_modern_countries.xlsx"
+) |>
+  dplyr::mutate(
+    value = case_when(
+      unit %in% c(
+        "1000 ha", "1000 MT", "1000 mt", "1000 metric tons",
+        "1000 tons", "1000 tonnes"
+      ) ~ value * 1000,
+      TRUE ~ value
+    ),
+    unit = case_when(
+      unit == "1000 ha" ~ "ha",
+      unit %in% c(
+        "1000 MT", "1000 mt", "1000 metric tons",
+        "1000 tonnes", "metric tons", "MT", "mt"
+      ) ~ "tonnes",
+      unit %in% c("1000 tons") ~ "tons",
+      TRUE ~ unit
+    ),
+    country_modern = case_when(
+      country_modern == "us virgin islands" ~ "united states virgin islands",
+      TRUE ~ country_modern
+    ),
+    iso3 = case_when(
+      country_modern == "united states virgin islands" ~ "vir",
+      TRUE ~ iso3
+    ),
+    Source = "iia",
+    iso3c = iso3,
+    FAOSTAT_name = country_modern,
+    variable = case_when(
+      variable %in% c(
+        "tappable area", "bearing area", "cultivated area",
+        "planted area"
+      ) ~ "area",
+      variable == "production of cocoons" ~ "production",
+      TRUE ~ variable
+    )
+  )
+
+colnames(iia_data)
+
+
+# merge iia_data and regions data:
+
+iia_data <- iia_data |>
+  left_join(country_lookup, by = c("iso3c")) |>
+  mutate(
+    iso_draft = polity_code,
+    FAOSTAT_name = FAOSTAT_name.x
+  ) |>
+  dplyr::select(-country_modern, -iso3, -notes, -FAOSTAT_name.y, -FAOSTAT_name.x)
+
+
+iia_data_filtered <- iia_data |>
+  filter(variable %in% c("production", "area")) |>
+  mutate(
+    iso3c = tolower(iso3c),
+    item = tolower(as.character(item)),
+    item_code = tolower(as.character(item_code))
+  ) |>
+  left_join(juan_data, by = "item", suffix = c("", "_juan")) |>
+  mutate(
+    item_code = ifelse(is.na(item_code) | item_code == "", item_code_juan, item_code)
+  ) |>
+  dplyr::select(
+    iso3c, item_code, value, unit, item, year, Source, polity_name, polity_code, iso_draft,
+    FAOSTAT_name, country
+  ) |>
+  mutate(
+    item_code = as.character(item_code),
+    year = as.character(year),
+  )
+
+# type of data mitchell_juan_fao
+mitchell_juan_fao <- mitchell_juan_fao |>
+  mutate(
+    item_code = as.character(item_code),
+    year = as.character(year)
+  )
+
+
+reference_table <- mitchell_juan_fao |>
+  dplyr::select(
+    iso3c, item_code, country, iso_draft, polity_name, FAOSTAT_name,
+    area_code, region, region_UN, polity_code, item, region
+  ) |>
+  distinct(iso3c, item_code, item, .keep_all = TRUE)
+
+# Merge final 
+# (advice: have some patience here)
+
+merged_data <- mitchell_juan_fao |>
+  full_join(iia_data_filtered,
+    by = c(
+      "iso3c" = "iso3c", "item_code" = "item_code", "year" = "year",
+      "unit" = "unit", "Source" = "Source", "item" = "item", "polity_name" = "polity_name",
+      "polity_code" = "polity_code", "iso_draft" = "iso_draft",
+      "country" = "country", "FAOSTAT_name" = "FAOSTAT_name"
+    )
+  ) |>
+  left_join(reference_table, by = c("iso3c"), suffix = c("", "_ref")) |>
+  mutate(
+    # Prioritize mitchell_juan_fao in value
+    value_final = ifelse(!is.na(value.x), value.x, value.y),
+    #  filling data
+    country = ifelse(is.na(country), country_ref, country),
+    iso_draft = ifelse(is.na(iso_draft), iso_draft_ref, iso_draft),
+    polity_name = ifelse(is.na(polity_name), polity_name_ref, polity_name),
+    FAOSTAT_name = ifelse(is.na(FAOSTAT_name), FAOSTAT_name_ref, FAOSTAT_name),
+    area_code = ifelse(is.na(area_code), area_code_ref, area_code),
+    region = ifelse(is.na(region), region_ref, region),
+    region_UN = ifelse(is.na(region_UN), region_UN_ref, region_UN),
+    polity_code = ifelse(is.na(polity_code), polity_code_ref, polity_code),
+    item = ifelse(is.na(item), item_ref, item),
+  ) |>
+  # selecting final columns
+  dplyr::select(
+    year, iso_draft, country, item, item_code, value_final, area_code, unit,
+    polity_name, FAOSTAT_name, area_code, region, region_UN, iso3c,
+    polity_code, Source, source_file, sheet
+  ) |>
+  # rename value
+  rename(value = value_final) |>
+  distinct(year, item, country, unit, .keep_all = TRUE)
+
+colnames(merged_data)
+
+
+write.csv(merged_data, "full_merged_data.csv", row.names = FALSE)
