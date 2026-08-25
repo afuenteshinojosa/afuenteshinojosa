@@ -1,6 +1,6 @@
 - 👋 Hi, I’m @afuenteshinojosa
 - 👀 I’m interested in food systems, agricultural history, geopolitics and nitrogen/phosphorus cycles
-- 🌱 I’m currently learning about how to spatialize data for the ERC StG - WHEP Project (https://cordis.europa.eu/project/id/101115126)
+- 🌱 I’m currently working for the ERC StG - WHEP Project (https://cordis.europa.eu/project/id/101115126)
 - 📫 How to reach me alejandra.fuentes@csic.es
 - 😄 Pronouns: she/her/ella/ela
 
